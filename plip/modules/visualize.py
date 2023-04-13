@@ -46,7 +46,7 @@ class PyMOLComplex:
         self.corrected_pdb = pcomp.corrected_pdb
         self.pdbid = mol.pymol_name
         self.hetid = ligand.hetid
-        self.chain = ligand.chain if not ligand.chain == "0" else ""  # #@todo Fix this
+        self.chain = ligand.chain if ligand.chain != "0" else ""
         self.position = str(ligand.position)
         self.outpath = mol.output_path
         self.metal_ids = [x.m_orig_idx for x in pli.ligand.metals]
@@ -150,9 +150,8 @@ def png_workaround(filepath, width=1200, height=800):
     while not os.path.isfile(originalfile) and attempts <= 10:
         sleep(0.1)
         attempts += 1
-    if os.name == 'nt':  # In Windows, make sure there is no file of the same name, cannot be overwritten as in Unix
-        if os.path.isfile(newfile):
-            os.remove(newfile)
+    if os.name == 'nt' and os.path.isfile(newfile):
+        os.remove(newfile)
     os.rename(originalfile, newfile)  # Remove frame number in filename
 
     #  Check if imagemagick is available and crop + resize the images
@@ -164,12 +163,12 @@ def png_workaround(filepath, width=1200, height=800):
                                     stderr=subprocess.STDOUT)
             sleep(0.1)
             attempts += 1
-        trim = 'convert -trim ' + newfile + ' -bordercolor White -border 20x20 ' + newfile + ';'  # Trim the image
+        trim = f'convert -trim {newfile} -bordercolor White -border 20x20 {newfile};'
         os.system(trim)
-        getwidth = 'w=`convert ' + newfile + ' -ping -format "%w" info:`;'  # Get the width of the new image
-        getheight = 'h=`convert ' + newfile + ' -ping -format "%h" info:`;'  # Get the hight of the new image
+        getwidth = f'w=`convert {newfile} -ping -format "%w" info:`;'
+        getheight = f'h=`convert {newfile} -ping -format "%h" info:`;'
         newres = 'if [ "$w" -gt "$h" ]; then newr="${w%.*}x$w"; else newr="${h%.*}x$h"; fi;'  # Set quadratic ratio
-        quadratic = 'convert ' + newfile + ' -gravity center -extent "$newr" ' + newfile  # Fill with whitespace
+        quadratic = f'convert {newfile} -gravity center -extent "$newr" {newfile}'
         os.system(getwidth + getheight + newres + quadratic)
     else:
         sys.stderr.write('Imagemagick not available. Images will not be resized or cropped.')

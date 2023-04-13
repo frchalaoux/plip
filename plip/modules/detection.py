@@ -84,7 +84,7 @@ def pistacking(rings_bs, rings_lig):
         # DISTANCE AND RING ANGLE CALCULATION
         d = euclidean3d(r.center, l.center)
         b = vecangle(r.normal, l.normal)
-        a = min(b, 180 - b if not 180 - b < 0 else b)  # Smallest of two angles, depending on direction of normal
+        a = min(b, 180 - b if b <= 180 else b)
 
         # RING CENTER OFFSET CALCULATION (project each ring center into the other ring)
         proj1 = projection(l.normal, l.center, r.center)
@@ -113,7 +113,7 @@ def pication(rings, pos_charged, protcharged):
     """
     data = namedtuple('pication', 'ring charge distance offset type restype resnr reschain protcharged')
     pairings = []
-    if not len(rings) == 0 and not len(pos_charged) == 0:
+    if len(rings) != 0 and len(pos_charged) != 0:
         for ring in rings:
             c = ring.center
             for p in pos_charged:
@@ -125,14 +125,14 @@ def pication(rings, pos_charged, protcharged):
                     if type(p).__name__ == 'lcharge' and p.fgroup == 'tertamine':
                         # Special case here if the ligand has a tertiary amine, check an additional angle
                         # Otherwise, we might have have a pi-cation interaction 'through' the ligand
-                        n_atoms = [a_neighbor for a_neighbor in OBAtomAtomIter(p.atoms[0].OBAtom)]
+                        n_atoms = list(OBAtomAtomIter(p.atoms[0].OBAtom))
                         n_atoms_coords = [(a.x(), a.y(), a.z()) for a in n_atoms]
                         amine_normal = np.cross(vector(n_atoms_coords[0], n_atoms_coords[1]),
                                                 vector(n_atoms_coords[2], n_atoms_coords[0]))
                         b = vecangle(ring.normal, amine_normal)
                         # Smallest of two angles, depending on direction of normal
-                        a = min(b, 180 - b if not 180 - b < 0 else b)
-                        if not a > 30.0:
+                        a = min(b, 180 - b if b <= 180 else b)
+                        if a <= 30.0:
                             resnr, restype = whichresnumber(ring.atoms[0]), whichrestype(ring.atoms[0])
                             reschain = whichchain(ring.atoms[0])
                             contact = data(ring=ring, charge=p, distance=d, offset=offset, type='regular',
@@ -175,16 +175,20 @@ def halogen(acceptor, donor):
             vec3, vec4 = vector(don.x.coords, acc.o.coords), vector(don.x.coords, don.c.coords)
             acc_angle, don_angle = vecangle(vec1, vec2), vecangle(vec3, vec4)
             is_sidechain_hal = acc.o.OBAtom.GetResidue().GetAtomProperty(acc.o.OBAtom, 8)  # Check if sidechain atom
-            if config.HALOGEN_ACC_ANGLE - config.HALOGEN_ANGLE_DEV < acc_angle \
-                    < config.HALOGEN_ACC_ANGLE + config.HALOGEN_ANGLE_DEV:
-                if config.HALOGEN_DON_ANGLE - config.HALOGEN_ANGLE_DEV < don_angle \
-                        < config.HALOGEN_DON_ANGLE + config.HALOGEN_ANGLE_DEV:
-                    contact = data(acc=acc, acc_orig_idx=acc.o_orig_idx, don=don, don_orig_idx=don.x_orig_idx,
-                                   distance=dist, don_angle=don_angle, acc_angle=acc_angle,
-                                   restype=whichrestype(acc.o), resnr=whichresnumber(acc.o),
-                                   reschain=whichchain(acc.o), donortype=don.x.OBAtom.GetType(), acctype=acc.o.type,
-                                   sidechain=is_sidechain_hal)
-                    pairings.append(contact)
+            if (
+                config.HALOGEN_ACC_ANGLE - config.HALOGEN_ANGLE_DEV
+                < acc_angle
+                < config.HALOGEN_ACC_ANGLE + config.HALOGEN_ANGLE_DEV
+                and config.HALOGEN_DON_ANGLE - config.HALOGEN_ANGLE_DEV
+                < don_angle
+                < config.HALOGEN_DON_ANGLE + config.HALOGEN_ANGLE_DEV
+            ):
+                contact = data(acc=acc, acc_orig_idx=acc.o_orig_idx, don=don, don_orig_idx=don.x_orig_idx,
+                               distance=dist, don_angle=don_angle, acc_angle=acc_angle,
+                               restype=whichrestype(acc.o), resnr=whichresnumber(acc.o),
+                               reschain=whichchain(acc.o), donortype=don.x.OBAtom.GetType(), acctype=acc.o.type,
+                               sidechain=is_sidechain_hal)
+                pairings.append(contact)
     return pairings
 
 
@@ -273,30 +277,13 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
             target, distance = contact_pair
             vectors_dict[target.atom.idx].append(vector(metal.coords, target.atom.coords))
 
-        # Listing of coordination numbers and their geometries
-        configs = {2: ['linear', ],
-                   3: ['trigonal.planar', 'trigonal.pyramidal'],
-                   4: ['tetrahedral', 'square.planar'],
-                   5: ['trigonal.bipyramidal', 'square.pyramidal'],
-                   6: ['octahedral', ]}
-
-        # Angle signatures for each geometry (as seen from each target atom)
-        ideal_angles = {'linear': [[180.0]] * 2,
-                        'trigonal.planar': [[120.0, 120.0]] * 3,
-                        'trigonal.pyramidal': [[109.5, 109.5]] * 3,
-                        'tetrahedral': [[109.5, 109.5, 109.5, 109.5]] * 4,
-                        'square.planar': [[90.0, 90.0, 90.0, 90.0]] * 4,
-                        'trigonal.bipyramidal': [[120.0, 120.0, 90.0, 90.0]] * 3 + [[90.0, 90.0, 90.0, 180.0]] * 2,
-                        'square.pyramidal': [[90.0, 90.0, 90.0, 180.0]] * 4 + [[90.0, 90.0, 90.0, 90.0]],
-                        'octahedral': [[90.0, 90.0, 90.0, 90.0, 180.0]] * 6}
         angles_dict = {}
 
-        for target in vectors_dict:
-            cur_vector = vectors_dict[target]
+        for target, cur_vector in vectors_dict.items():
             other_vectors = []
-            for t in vectors_dict:
-                if not t == target:
-                    [other_vectors.append(x) for x in vectors_dict[t]]
+            for t, value in vectors_dict.items():
+                if t != target:
+                    [other_vectors.append(x) for x in value]
             angles = [vecangle(pair[0], pair[1]) for pair in itertools.product(cur_vector, other_vectors)]
             angles_dict[target] = angles
 
@@ -309,6 +296,22 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
             excluded = []
             rms = 0.0
         else:
+            # Listing of coordination numbers and their geometries
+            configs = {2: ['linear', ],
+                       3: ['trigonal.planar', 'trigonal.pyramidal'],
+                       4: ['tetrahedral', 'square.planar'],
+                       5: ['trigonal.bipyramidal', 'square.pyramidal'],
+                       6: ['octahedral', ]}
+
+            # Angle signatures for each geometry (as seen from each target atom)
+            ideal_angles = {'linear': [[180.0]] * 2,
+                            'trigonal.planar': [[120.0, 120.0]] * 3,
+                            'trigonal.pyramidal': [[109.5, 109.5]] * 3,
+                            'tetrahedral': [[109.5, 109.5, 109.5, 109.5]] * 4,
+                            'square.planar': [[90.0, 90.0, 90.0, 90.0]] * 4,
+                            'trigonal.bipyramidal': [[120.0, 120.0, 90.0, 90.0]] * 3 + [[90.0, 90.0, 90.0, 180.0]] * 2,
+                            'square.pyramidal': [[90.0, 90.0, 90.0, 180.0]] * 4 + [[90.0, 90.0, 90.0, 90.0]],
+                            'octahedral': [[90.0, 90.0, 90.0, 90.0, 180.0]] * 6}
             for coo in sorted(configs, reverse=True):  # Start with highest coordination number
                 geometries = configs[coo]
                 for geometry in geometries:
@@ -324,9 +327,8 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
                         best_target = None  # There's one best-matching target for each subsignature
                         best_target_score = 999
 
-                        for k, target in enumerate(angles_dict):
+                        for target, observed_angles in angles_dict.items():
                             if target not in used_up_targets:
-                                observed_angles = angles_dict[target]  # Observed angles from perspective of one target
                                 single_target_scores = []
                                 used_up_observed_angles = []
                                 for i, ideal_angle in enumerate(subsignature):
@@ -343,7 +345,7 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
                                         used_up_observed_angles.append(best_match)
                                         single_target_scores.append(best_match_diff)
                                 # Calculate RMS for target angles
-                                target_total = sum([x ** 2 for x in single_target_scores]) ** 0.5  # Tot. score targ/sig
+                                target_total = sum(x ** 2 for x in single_target_scores)**0.5
                                 if target_total < best_target_score:
                                     best_target_score = target_total
                                     best_target = target
@@ -359,7 +361,7 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
 
         # Make a decision here. Starting with the geometry with lowest difference in ideal and observed partners ...
         # Check if the difference between the RMS to the next best solution is not larger than 0.5
-        if not num_targets == 1:  # Can't decide for any geoemtry in that case
+        if num_targets != 1:  # Can't decide for any geoemtry in that case
             all_total = sorted(all_total, key=lambda x: abs(x.diff_targets))
             for i, total in enumerate(all_total):
                 next_total = all_total[i + 1]
@@ -376,7 +378,7 @@ def metal_complexation(metals, metal_binding_lig, metal_binding_bs):
                     final_geom, final_coo, rms, excluded = "NA", "NA", 0.0, []
 
         # Record all contact pairing, excluding those with targets superfluous for chosen geometry
-        only_water = set([x[0].location for x in contact_pairs]) == {'water'}
+        only_water = {x[0].location for x in contact_pairs} == {'water'}
         if not only_water:  # No complex if just with water as targets
             message("Metal ion %s complexed with %s geometry (coo. number %r/ %i observed).\n"
                     % (metal.type, final_geom, final_coo, num_targets), indent=True)

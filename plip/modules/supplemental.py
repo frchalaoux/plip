@@ -53,7 +53,7 @@ def tmpfile(prefix, direc):
 def is_lig(hetid):
     """Checks if a PDB compound can be excluded as a small molecule ligand"""
     h = hetid.upper()
-    return not (h == 'HOH' or h in config.UNSUPPORTED)
+    return h != 'HOH' and h not in config.UNSUPPORTED
 
 
 def extract_pdbid(string):
@@ -68,19 +68,19 @@ def extract_pdbid(string):
 
 def whichrestype(atom):
     """Returns the residue name of an Pybel or OpenBabel atom."""
-    atom = atom if not isinstance(atom, Atom) else atom.OBAtom  # Convert to OpenBabel Atom
+    atom = atom.OBAtom if isinstance(atom, Atom) else atom
     return atom.GetResidue().GetName() if atom.GetResidue() is not None else None
 
 
 def whichresnumber(atom):
     """Returns the residue number of an Pybel or OpenBabel atom (numbering as in original PDB file)."""
-    atom = atom if not isinstance(atom, Atom) else atom.OBAtom  # Convert to OpenBabel Atom
+    atom = atom.OBAtom if isinstance(atom, Atom) else atom
     return atom.GetResidue().GetNum() if atom.GetResidue() is not None else None
 
 
 def whichchain(atom):
     """Returns the residue number of an PyBel or OpenBabel atom."""
-    atom = atom if not isinstance(atom, Atom) else atom.OBAtom  # Convert to OpenBabel Atom
+    atom = atom.OBAtom if isinstance(atom, Atom) else atom
     return atom.GetResidue().GetChain() if atom.GetResidue() is not None else None
 
 #########################
@@ -90,7 +90,7 @@ def whichchain(atom):
 
 def euclidean3d(v1, v2):
     """Faster implementation of euclidean distance for the 3D case."""
-    if not len(v1) == 3 and len(v2) == 3:
+    if len(v1) != 3 and len(v2) == 3:
         print("Vectors are not in 3D space. Returning None.")
         return None
     return np.sqrt((v1[0] - v2[0]) ** 2 + (v1[1] - v2[1]) ** 2 + (v1[2] - v2[2]) ** 2)
@@ -125,7 +125,7 @@ def normalize_vector(v):
     :returns : normalized vector v
     """
     norm = np.linalg.norm(v)
-    return v/norm if not norm == 0 else v
+    return v/norm if norm != 0 else v
 
 
 def centroid(coo):
@@ -189,7 +189,7 @@ def cluster_doubles(double_list):
                 clusters[location[b]].add(a)
                 location[a] = location[b]
             # If neither a nor b is in any cluster, create a new one with a and b
-            if not (b in location and a in location):
+            if b not in location or a not in location:
                 clusters.append(set(t))
                 location[a] = len(clusters) - 1
                 location[b] = len(clusters) - 1
@@ -213,14 +213,24 @@ def folder_exists(folder_path):
 def create_folder_if_not_exists(folder_path):
     """Creates a folder if it does not exists."""
     folder_path = tilde_expansion(folder_path)
-    folder_path = "".join([folder_path, '/']) if not folder_path[-1] == '/' else folder_path
+    folder_path = (
+        "".join([folder_path, '/']) if folder_path[-1] != '/' else folder_path
+    )
     direc = os.path.dirname(folder_path)
     if not folder_exists(direc):
         os.makedirs(direc)
 
 
 def cmd_exists(c):
-    return subprocess.call("type " + c, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0
+    return (
+        subprocess.call(
+            f"type {c}",
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        == 0
+    )
 
 ################
 # PyMOL-specific
@@ -243,7 +253,7 @@ def start_pymol(quiet=False, options='-p', run=False):
     """Starts up PyMOL and sets general options. Quiet mode suppresses all PyMOL output.
     Command line options can be passed as the second argument."""
     import pymol
-    pymol.pymol_argv = ['pymol', '%s' % options] + sys.argv[1:]
+    pymol.pymol_argv = ['pymol', f'{options}'] + sys.argv[1:]
     if run:
         initialize_pymol(options)
     if quiet:
@@ -289,10 +299,9 @@ def nucleotide_linkage(residues):
                 dna_rna[chain] = [(resname, pos), ]
             else:
                 dna_rna[chain].append((resname, pos))
-    for chain in dna_rna:
-        nuc_list = dna_rna[chain]
+    for chain, nuc_list in dna_rna.items():
         for i, nucleotide in enumerate(nuc_list):
-            if not i == len(nuc_list) - 1:
+            if i != len(nuc_list) - 1:
                 name, pos = nucleotide
                 nextnucleotide = nuc_list[i + 1]
                 nextname, nextpos = nextnucleotide
@@ -306,7 +315,7 @@ def nucleotide_linkage(residues):
 def classify_by_name(names):
     """Classify a (composite) ligand by the HETID(s)"""
     if len(names) > 3:  # Polymer
-        if len({'U', 'A', 'C', 'G'}.intersection(set(names))) != 0:
+        if {'U', 'A', 'C', 'G'}.intersection(set(names)):
             ligtype = 'RNA'
         elif len({'DT', 'DA', 'DC', 'DG'}.intersection(set(names))) != 0:
             ligtype = 'DNA'
@@ -319,9 +328,8 @@ def classify_by_name(names):
         if name in config.METAL_IONS:
             if len(names) == 1:
                 ligtype = 'ION'
-            else:
-                if "ION" not in ligtype:
-                    ligtype += '+ION'
+            elif "ION" not in ligtype:
+                ligtype += '+ION'
     return ligtype
 
 
@@ -361,11 +369,9 @@ def canonicalize(lig):
     if testcan != '':
         reference.removeh()
         isomorphs = get_isomorphisms(reference, lig)  # isomorphs now holds all isomorphisms within the molecule
-        if not len(isomorphs) == 0:
-            smi_dict = {}
+        if len(isomorphs) != 0:
             smi_to_can = isomorphs[0]
-            for x in smi_to_can:
-                smi_dict[int(x[1]) + 1] = int(x[0]) + 1
+            smi_dict = {int(x[1]) + 1: int(x[0]) + 1 for x in smi_to_can}
             atomorder = [smi_dict[x + 1] for x in range(len(lig.atoms))]
         else:
             atomorder = None
@@ -376,15 +382,10 @@ def int32_to_negative(int32):
     """Checks if a suspicious number (e.g. ligand position) is in fact a negative number represented as a
     32 bit integer and returns the actual number.
     """
-    dct = {}
     if int32 == 4294967295:  # Special case in some structures (note, this is just a workaround)
         return -1
-    for i in range(-1000, -1):
-        dct[np.uint32(i)] = i
-    if int32 in dct:
-        return dct[int32]
-    else:
-        return int32
+    dct = {np.uint32(i): i for i in range(-1000, -1)}
+    return dct.get(int32, int32)
 
 
 def read_pdb(pdbfname):
@@ -426,11 +427,11 @@ def readmol(path):
         mol = pybel.ob.OBMol()
         obc.ReadString(mol, filestr)
         if not mol.Empty():
-            if sformat == 'pdbqt':
-                message('[EXPERIMENTAL] Input is PDBQT file. Some features (especially visualization) might not '
-                        'work as expected. Please consider using PDB format instead.\n')
             if sformat == 'mmcif':
                 message('[EXPERIMENTAL] Input is mmCIF file. Most features do currently not work with this format.\n')
+            elif sformat == 'pdbqt':
+                message('[EXPERIMENTAL] Input is PDBQT file. Some features (especially visualization) might not '
+                        'work as expected. Please consider using PDB format instead.\n')
             return pybel.Molecule(mol), sformat
     sysexit(4, 'No valid file format provided.')
 
@@ -445,15 +446,15 @@ def message(msg, indent=False):
     """Writes messages in verbose mode"""
     if config.VERBOSE:
         if indent:
-            msg = '  ' + msg
+            msg = f'  {msg}'
         sys.stdout.write(msg)
 
 
 def debuglog(msg):
     """Writes debug messages"""
     if config.DEBUG:
-        msg = '    %% DEBUG: ' + msg
+        msg = f'    %% DEBUG: {msg}'
         if len(msg) > 100:
-            msg = msg[:100] + ' ...'
+            msg = f'{msg[:100]} ...'
         msg += '\n'
         sys.stdout.write(msg)

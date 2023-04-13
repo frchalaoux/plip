@@ -53,12 +53,19 @@ class TextOutput:
 
         self.hydrophobic_features = ('RESNR', 'RESTYPE', 'RESCHAIN', 'DIST', 'LIGCARBONIDX', 'PROTCARBONIDX', 'LIGCOO',
                                      'PROTCOO')
-        self.hydrophobic_info = []
-        for hydroph in self.complex.hydrophobic_contacts:
-            self.hydrophobic_info.append((hydroph.resnr, hydroph.restype, hydroph.reschain, '%.2f' % hydroph.distance,
-                                          hydroph.ligatom_orig_idx, hydroph.bsatom_orig_idx, hydroph.ligatom.coords,
-                                          hydroph.bsatom.coords))
-
+        self.hydrophobic_info = [
+            (
+                hydroph.resnr,
+                hydroph.restype,
+                hydroph.reschain,
+                '%.2f' % hydroph.distance,
+                hydroph.ligatom_orig_idx,
+                hydroph.bsatom_orig_idx,
+                hydroph.ligatom.coords,
+                hydroph.bsatom.coords,
+            )
+            for hydroph in self.complex.hydrophobic_contacts
+        ]
         ##################
         # HYDROGEN BONDS #
         ##################
@@ -149,14 +156,24 @@ class TextOutput:
 
         self.halogen_features = ('RESNR', 'RESTYPE', 'RESCHAIN', 'SIDECHAIN', 'DIST', 'DON_ANGLE', 'ACC_ANGLE',
                                  'DON_IDX', 'DONORTYPE', 'ACC_IDX', 'ACCEPTORTYPE', 'LIGCOO', 'PROTCOO')
-        self.halogen_info = []
-        for halogen in self.complex.halogen_bonds:
-            self.halogen_info.append((halogen.resnr, halogen.restype, halogen.reschain, halogen.sidechain,
-                                      '%.2f' % halogen.distance, '%.2f' % halogen.don_angle, '%.2f' % halogen.acc_angle,
-                                      halogen.don_orig_idx, halogen.donortype,
-                                      halogen.acc_orig_idx, halogen.acctype,
-                                      halogen.acc.o.coords, halogen.don.x.coords))
-
+        self.halogen_info = [
+            (
+                halogen.resnr,
+                halogen.restype,
+                halogen.reschain,
+                halogen.sidechain,
+                '%.2f' % halogen.distance,
+                '%.2f' % halogen.don_angle,
+                '%.2f' % halogen.acc_angle,
+                halogen.don_orig_idx,
+                halogen.donortype,
+                halogen.acc_orig_idx,
+                halogen.acctype,
+                halogen.acc.o.coords,
+                halogen.don.x.coords,
+            )
+            for halogen in self.complex.halogen_bonds
+        ]
         ###################
         # METAL COMPLEXES #
         ###################
@@ -164,17 +181,30 @@ class TextOutput:
         self.metal_features = ('RESNR', 'RESTYPE', 'RESCHAIN', 'METAL_IDX', 'METAL_TYPE', 'TARGET_IDX', 'TARGET_TYPE',
                                'COORDINATION', 'DIST', 'LOCATION', 'RMS', 'GEOMETRY', 'COMPLEXNUM', 'METALCOO',
                                'TARGETCOO')
-        self.metal_info = []
-        # Coordinate format here is non-standard since the interaction partner can be either ligand or protein
-        for m in self.complex.metal_complexes:
-            self.metal_info.append((m.resnr, m.restype, m.reschain, m.metal_orig_idx, m.metal_type,
-                                    m.target_orig_idx, m.target_type, m.coordination_num, '%.2f' % m.distance,
-                                    m.location, '%.2f' % m.rms, m.geometry, str(m.complexnum), m.metal.coords,
-                                    m.target.atom.coords))
+        self.metal_info = [
+            (
+                m.resnr,
+                m.restype,
+                m.reschain,
+                m.metal_orig_idx,
+                m.metal_type,
+                m.target_orig_idx,
+                m.target_type,
+                m.coordination_num,
+                '%.2f' % m.distance,
+                m.location,
+                '%.2f' % m.rms,
+                m.geometry,
+                str(m.complexnum),
+                m.metal.coords,
+                m.target.atom.coords,
+            )
+            for m in self.complex.metal_complexes
+        ]
 
     def write_section(self, name, features, info, f):
         """Provides formatting for one section (e.g. hydrogen bonds)"""
-        if not len(info) == 0:
+        if len(info) != 0:
             f.write('\n\n### %s ###\n' % name)
             f.write('%s\n' % '\t'.join(features))
             for line in info:
@@ -184,13 +214,13 @@ class TextOutput:
         """Given an array, the function formats and returns and table in rST format."""
         # Determine cell width for each column
         cell_dict = {}
-        for i, row in enumerate(array):
+        for row in array:
             for j, val in enumerate(row):
                 if j not in cell_dict:
                     cell_dict[j] = []
                 cell_dict[j].append(val)
         for item in cell_dict:
-            cell_dict[item] = max([len(x) for x in cell_dict[item]]) + 1  # Contains adapted width for each column
+            cell_dict[item] = max(len(x) for x in cell_dict[item]) + 1
 
         # Format top line
         num_cols = len(array[0])
@@ -211,10 +241,7 @@ class TextOutput:
 
             # Seperation lines
             form += '+'
-            if i == 0:
-                sign = '='
-            else:
-                sign = '-'
+            sign = '=' if i == 0 else '-'
             for col in range(num_cols):
                 form += (cell_dict[col] + 1) * sign
                 form += '+'
@@ -224,12 +251,18 @@ class TextOutput:
     def generate_txt(self):
         """Generates an flat text report for a single binding site"""
 
-        txt = []
-        txt.append('%s (%s) - %s' % (self.bsid, self.longname, self.ligtype))
-        for i, member in enumerate(self.lig_members[1:]):
-            txt.append('  + %s' % ":".join(str(element) for element in member))
-        txt.append("-" * len(self.bsid))
-        txt.append("Interacting chain(s): %s\n" % ','.join([chain for chain in self.interacting_chains]))
+        txt = [f'{self.bsid} ({self.longname}) - {self.ligtype}']
+        txt.extend(
+            f'  + {":".join(str(element) for element in member)}'
+            for member in self.lig_members[1:]
+        )
+        txt.extend(
+            (
+                "-" * len(self.bsid),
+                "Interacting chain(s): %s\n"
+                % ','.join(list(self.interacting_chains)),
+            )
+        )
         for section in [['Hydrophobic Interactions', self.hydrophobic_features, self.hydrophobic_info],
                         ['Hydrogen Bonds', self.hbond_features, self.hbond_info],
                         ['Water Bridges', self.waterbridge_features, self.waterbridge_info],
@@ -241,7 +274,7 @@ class TextOutput:
             iname, features, interaction_information = section
             # Sort results first by res number, then by distance and finally ligand coordinates to get a unique order
             interaction_information = sorted(interaction_information, key=itemgetter(0, 2, -2))
-            if not len(interaction_information) == 0:
+            if len(interaction_information) != 0:
 
                 txt.append('\n**%s**' % iname)
                 table = [features, ]
@@ -325,10 +358,13 @@ class TextOutput:
             # Sort results first by res number, then by distance and finally ligand coordinates to get a unique order
             interaction_information = sorted(interaction_information, key=itemgetter(0, 2, -2))
             for j, single_contact in enumerate(interaction_information):
-                if not element_name == 'metal_complexes':
-                    new_contact = et.SubElement(interaction, element_name[:-1], id=str(j + 1))
-                else:  # Metal Complex[es]
-                    new_contact = et.SubElement(interaction, element_name[:-2], id=str(j + 1))
+                new_contact = (
+                    et.SubElement(interaction, element_name[:-2], id=str(j + 1))
+                    if element_name == 'metal_complexes'
+                    else et.SubElement(
+                        interaction, element_name[:-1], id=str(j + 1)
+                    )
+                )
                 for i, feature in enumerate(single_contact):
                     # Just assign the value unless it's an atom list, use subelements in this case
                     if features[i] == 'LIG_IDX_LIST':
@@ -366,7 +402,12 @@ class TextOutput:
         bsid = ':'.join([self.ligand.hetid, self.ligand.chain, str(self.ligand.position)])
         if self.ligand.atomorder is not None:
             smiles_to_pdb_map = [(key, self.ligand.Mapper.mapid(self.ligand.can_to_pdb[key], mtype='protein', bsid=bsid)) for key in self.ligand.can_to_pdb]
-            smiles_to_pdb.text = ','.join([str(mapping[0])+':'+str(mapping[1]) for mapping in smiles_to_pdb_map])
+            smiles_to_pdb.text = ','.join(
+                [
+                    f'{str(mapping[0])}:{str(mapping[1])}'
+                    for mapping in smiles_to_pdb_map
+                ]
+            )
         else:
             smiles_to_pdb.text = ''
 

@@ -354,7 +354,9 @@ class LiteratureValidatedTest(unittest.TestCase):
         # Publication give the Prediction for Asp91 as hydrogen bond, when this contains two acceptor atoms.
         hbonds = {hbond.resnr for hbond in s.hbonds_pdon}
         # #@todo Hbond to 128 not detected
-        self.assertTrue({37, 38, 39, 40, 92, 63, 92, 115, 117, 185, 189, 215, 220}.issubset(hbonds))
+        self.assertTrue(
+            {37, 38, 39, 40, 63, 92, 115, 117, 185, 189, 215, 220}.issubset(hbonds)
+        )
         # Water bridges to Gly35, Thr37, Gly38, Asp40, Arg60, Arg61, Ser63, Asn66, Ser117, Tyr128, Lys189, Arg220
         waterbridges = {wb.resnr for wb in s.water_bridges}
         # Hydrogen bonds to 35, 37, 38, 40, 63, 117, 128, 189, 220 not detected due to prioritization
@@ -436,7 +438,7 @@ class LiteratureValidatedTest(unittest.TestCase):
         s = tmpmol.interaction_sets[bsid]
         # Hydrogen bonds to Ala11, Lys14, Thr15, Ser16, Asp113, Met114, Ala143 and Asp113
         hbonds = {hbond.resnr for hbond in s.hbonds_pdon}
-        self.assertTrue({11, 13, 14, 15, 16, 113, 114, 143, 113}.issubset(hbonds))
+        self.assertTrue({11, 13, 14, 15, 16, 114, 143, 113}.issubset(hbonds))
         # Water bridges to Ala11 not detected due to prioritization of hydrogen bonds
         # Saltbridge to Asp116
         saltb = {saltbridge.resnr for saltbridge in s.saltbridge_pneg}

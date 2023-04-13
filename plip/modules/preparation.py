@@ -66,12 +66,8 @@ class PDBParser:
                 if location != 'A':
                     alt.append(atomid)
 
-                if not previous_ter:
-                    i += 1
-                    j += 1
-                else:
-                    i += 1
-                    j += 2
+                j += 2 if previous_ter else 1
+                i += 1
                 d[i] = j
                 previous_ter = False
             # Numbering Changes at TER records
@@ -92,27 +88,25 @@ class PDBParser:
         # #@todo Introduce verbose/log
         #@ todo Unit tests
         fixed = False
-        if pdbline.startswith('ATOM'):
-            # No chain assigned
-            if pdbline[21] == ' ':
-                pdbline = pdbline[:21] + 'A' + pdbline[22:]
-                fixed = True
+        if pdbline.startswith('ATOM') and pdbline[21] == ' ':
+            pdbline = f'{pdbline[:21]}A{pdbline[22:]}'
+            fixed = True
         if pdbline.startswith('HETATM'):
             # No chain assigned
             if pdbline[21] == ' ':
-                pdbline = pdbline[:21] + 'Z' + pdbline[22:]
+                pdbline = f'{pdbline[:21]}Z{pdbline[22:]}'
                 fixed = True
             # No residue number assigned
             if pdbline[23:26] == '   ':
-                pdbline = pdbline[:23] + '999' + pdbline[26:]
+                pdbline = f'{pdbline[:23]}999{pdbline[26:]}'
                 fixed = True
             # Non-standard Ligand Names
             ligname = pdbline[17:20]
             if re.match("[^a-zA-Z0-9_]", ligname.strip()):
-                pdbline = pdbline[:17] + 'LIG ' + pdbline[21:]
+                pdbline = f'{pdbline[:17]}LIG {pdbline[21:]}'
                 fixed = True
             if len(ligname.strip()) == 0:
-                pdbline = pdbline[:17] + 'LIG ' + pdbline[21:]
+                pdbline = f'{pdbline[:17]}LIG {pdbline[21:]}'
                 fixed = True
         self.num_fixed_lines += 1 if fixed else 0
         return pdbline
@@ -142,13 +136,11 @@ class LigandFinder:
         """Get all ligands from a PDB file and prepare them for analysis.
         Returns all non-empty ligands.
         """
-        ligands = []
-
         # Filter for ligands using lists
         ligand_residues, self.lignames_all, self.water = self.filter_for_ligands()
 
         all_res_dict = {(a.GetName(), a.GetChain(), a.GetNum()): a for a in ligand_residues}
-        self.lignames_kept = list(set([a.GetName() for a in ligand_residues]))
+        self.lignames_kept = list({a.GetName() for a in ligand_residues})
 
         if not config.BREAKCOMPOSITE:
             #  Update register of covalent links with those between DNA/RNA subunits
@@ -157,8 +149,7 @@ class LigandFinder:
             res_kmers = self.identify_kmers(all_res_dict)
         else:
             res_kmers = [[a, ] for a in ligand_residues]
-        for kmer in res_kmers:  # iterate over all ligands and extract molecules + information
-            ligands.append(self.extract_ligand(kmer))
+        ligands = [self.extract_ligand(kmer) for kmer in res_kmers]
         return [lig for lig in ligands if len(lig.mol.atoms) != 0]
 
     def extract_ligand(self, kmer):
@@ -167,7 +158,7 @@ class LigandFinder:
         members = [(res.GetName(), res.GetChain(), int32_to_negative(res.GetNum())) for res in kmer]
         members = sorted(members, key=lambda x: (x[1], x[2]))
         rname, rchain, rnum = members[0]
-        debuglog("Finalizing extraction for ligand %s:%s:%s" % (rname, rchain, rnum))
+        debuglog(f"Finalizing extraction for ligand {rname}:{rchain}:{rnum}")
         names = [x[0] for x in members]
         longname = '-'.join([x[0] for x in members])
 
@@ -176,25 +167,33 @@ class LigandFinder:
 
         hetatoms = set()
         for obresidue in kmer:
-            hetatoms_res = set([(obatom.GetIdx(), obatom) for obatom in pybel.ob.OBResidueAtomIter(obresidue)
-                                if not obatom.IsHydrogen()])
+            hetatoms_res = {
+                (obatom.GetIdx(), obatom)
+                for obatom in pybel.ob.OBResidueAtomIter(obresidue)
+                if not obatom.IsHydrogen()
+            }
 
             if not config.ALTLOC:
                 # Remove alternative conformations (standard -> True)
-                hetatoms_res = set([atm for atm in hetatoms_res
-                                    if not self.mapper.mapid(atm[0], mtype='protein',
-                                                             to='internal') in self.altconformations])
+                hetatoms_res = {
+                    atm
+                    for atm in hetatoms_res
+                    if self.mapper.mapid(atm[0], mtype='protein', to='internal')
+                    not in self.altconformations
+                }
             hetatoms.update(hetatoms_res)
 
         hetatoms = dict(hetatoms)  # make it a dict with idx as key and OBAtom as value
         lig = pybel.ob.OBMol()  # new ligand mol
-        neighbours = dict()
+        neighbours = {}
         for obatom in hetatoms.values():  # iterate over atom objects
             idx = obatom.GetIdx()
             lig.AddAtom(obatom)
             # ids of all neighbours of obatom
-            neighbours[idx] = set([neighbour_atom.GetIdx() for neighbour_atom
-                                   in pybel.ob.OBAtomAtomIter(obatom)]) & set(hetatoms.keys())
+            neighbours[idx] = {
+                neighbour_atom.GetIdx()
+                for neighbour_atom in pybel.ob.OBAtomAtomIter(obatom)
+            } & set(hetatoms.keys())
 
         ##############################################################
         # map the old atom idx of OBMol to the new idx of the ligand #
@@ -225,33 +224,41 @@ class LigandFinder:
         if atomorder is not None:
             can_to_pdb = {atomorder[key-1]: mapold[key] for key in mapold}
 
-        ligand = data(mol=lig, hetid=rname, chain=rchain, position=rnum, water=self.water,
-                      members=members, longname=longname, type=ligtype, atomorder=atomorder,
-                      can_to_pdb=can_to_pdb)
-        return ligand
+        return data(
+            mol=lig,
+            hetid=rname,
+            chain=rchain,
+            position=rnum,
+            water=self.water,
+            members=members,
+            longname=longname,
+            type=ligtype,
+            atomorder=atomorder,
+            can_to_pdb=can_to_pdb,
+        )
 
     def filter_for_ligands(self):
         """Given an OpenBabel Molecule, get all ligands, their names, and water"""
 
-        candidates1 = [o for o in pybel.ob.OBResidueIter(self.proteincomplex.OBMol) if not (o.GetResidueProperty(9)
-                                                                                         or o.GetResidueProperty(0))]
-        all_lignames = set([a.GetName() for a in candidates1])
+        candidates1 = [
+            o
+            for o in pybel.ob.OBResidueIter(self.proteincomplex.OBMol)
+            if not o.GetResidueProperty(9) and not o.GetResidueProperty(0)
+        ]
+        all_lignames = {a.GetName() for a in candidates1}
 
         water = [o for o in pybel.ob.OBResidueIter(self.proteincomplex.OBMol) if o.GetResidueProperty(9)]
         # Filter out non-ligands
         candidates2 = [a for a in candidates1 if is_lig(a.GetName()) and a.GetName() not in self.modresidues]
         debuglog("%i ligand(s) after first filtering step." % len(candidates2))
 
-        ############################################
-        # Filtering by counting and artifacts list #
-        ############################################
-        artifacts = []
-        unique_ligs = set(a.GetName() for a in candidates2)
-        for ulig in unique_ligs:
-            # Discard if appearing 15 times or more and is possible artifact
-            if ulig in config.biolip_list and [a.GetName() for a in candidates2].count(ulig) >= 15:
-                artifacts.append(ulig)
-
+        unique_ligs = {a.GetName() for a in candidates2}
+        artifacts = [
+            ulig
+            for ulig in unique_ligs
+            if ulig in config.biolip_list
+            and [a.GetName() for a in candidates2].count(ulig) >= 15
+        ]
         selected_ligands = [a for a in candidates2 if a.GetName() not in artifacts]
 
         return selected_ligands, all_lignames, water
@@ -265,24 +272,23 @@ class LigandFinder:
                       [c for c in self.covalent if c.id1 in self.lignames_kept and c.id2 in self.lignames_kept and
                        c.conf1 in ['A', ''] and c.conf2 in ['A', '']
                       and (c.id1, c.chain1, c.pos1) in residues and (c.id2, c.chain2, c.pos2) in residues]]
-        kmers = cluster_doubles(ligdoubles)
-        if not kmers:  # No ligand kmers, just normal independent ligands
+        if not (kmers := cluster_doubles(ligdoubles)):
             return [[residues[res]] for res in residues]
 
-        else:
-            # res_kmers contains clusters of covalently bound ligand residues (kmer ligands)
-            res_kmers = [[residues[res] for res in kmer] for kmer in kmers]
+        # res_kmers contains clusters of covalently bound ligand residues (kmer ligands)
+        res_kmers = [[residues[res] for res in kmer] for kmer in kmers]
 
-            # In this case, add other ligands which are not part of a kmer
-            in_kmer = []
-            for res_kmer in res_kmers:
-                for res in res_kmer:
-                    in_kmer.append((res.GetName(), res.GetChain(), res.GetNum()))
-            for res in residues:
-                if res not in in_kmer:
-                    newres = [residues[res], ]
-                    res_kmers.append(newres)
-            return res_kmers
+        # In this case, add other ligands which are not part of a kmer
+        in_kmer = []
+        for res_kmer in res_kmers:
+            in_kmer.extend(
+                (res.GetName(), res.GetChain(), res.GetNum()) for res in res_kmer
+            )
+        for res in residues:
+            if res not in in_kmer:
+                newres = [residues[res], ]
+                res_kmers.append(newres)
+        return res_kmers
 
 
 class Mapper:
@@ -321,9 +327,14 @@ class Mol:
         """Select all carbon atoms which have only carbons and/or hydrogens as direct neighbors."""
         atom_set = []
         data = namedtuple('hydrophobic', 'atom orig_idx')
-        atm = [a for a in all_atoms if a.atomicnum == 6 and set([natom.GetAtomicNum() for natom
-                                                                 in pybel.ob.OBAtomAtomIter(a.OBAtom)]).issubset(
-            {1, 6})]
+        atm = [
+            a
+            for a in all_atoms
+            if a.atomicnum == 6
+            and {
+                natom.GetAtomicNum() for natom in pybel.ob.OBAtomAtomIter(a.OBAtom)
+            }.issubset({1, 6})
+        ]
         for atom in atm:
             orig_idx = self.Mapper.mapid(atom.idx, mtype=self.mtype, bsid=self.bsid)
             if atom.idx not in self.altconf:
@@ -344,8 +355,8 @@ class Mol:
         """Find all possible strong and weak hydrogen bonds donors (all hydrophobic C-H pairings)"""
         donor_pairs = []
         data = namedtuple('hbonddonor', 'd d_orig_idx h type')
+        in_ring = False
         for donor in [a for a in all_atoms if a.OBAtom.IsHbondDonor() and a.idx not in self.altconf]:
-            in_ring = False
             if not in_ring:
                 for adj_atom in [a for a in pybel.ob.OBAtomAtomIter(donor.OBAtom) if a.IsHbondDonorH()]:
                     d_orig_idx = self.Mapper.mapid(donor.idx, mtype=self.mtype, bsid=self.bsid)
@@ -362,7 +373,7 @@ class Mol:
         data = namedtuple('aromatic_ring', 'atoms atoms_orig_idx normal obj center type')
         rings, arings = [], []
         # Check here first for ligand rings not being detected as aromatic by Babel and check for planarity
-        for ring in [r for r in mol.OBMol.GetSSSR()]:
+        for ring in list(mol.OBMol.GetSSSR()):
             r_atoms = [a for a in all_atoms if ring.IsMember(a.OBAtom)]
             normals = []
             aromatic = True
@@ -379,9 +390,9 @@ class Mol:
                     aromatic = False
                     break
             # Ring is aromatic either by OpenBabel's criteria or if sufficiently planar
-            res = list(set([whichrestype(a) for a in r_atoms]))
+            res = list({whichrestype(a) for a in r_atoms})
             aromatic_amino = False
-            if not res == []:
+            if res:
                 aromatic_amino = res[0] in ['TYR', 'TRP', 'HIS', 'PHE']
             if aromatic or ring.IsAromatic() or aromatic_amino:
                 arings.append(ring)
@@ -392,7 +403,7 @@ class Mol:
             # Only consider rings with a minimum size of 5 atoms and restrict selection to avoid problems in
             # covalently bound ligands
             if 4 < len(r_atoms) <= 6:
-                typ = r.GetType() if not r.GetType() == '' else 'unknown'
+                typ = r.GetType() if r.GetType() != '' else 'unknown'
                 ring_atms = [r_atoms[a].coords for a in [0, 2, 4]]  # Probe atoms for normals, assuming planarity
                 ringv1 = vector(ring_atms[0], ring_atms[1])
                 ringv2 = vector(ring_atms[2], ring_atms[0])
@@ -488,13 +499,25 @@ class PLInteraction:
         self.num_unpaired_hal = len(self.unpaired_hal)
 
         # Exclude empty chains (coming from ligand as a target, from metal complexes)
-        self.interacting_chains = sorted(list(set([i.reschain for i in self.all_itypes
-                                                   if i.reschain not in [' ', None]])))
+        self.interacting_chains = sorted(
+            list(
+                {
+                    i.reschain
+                    for i in self.all_itypes
+                    if i.reschain not in [' ', None]
+                }
+            )
+        )
 
         # Get all interacting residues, excluding ligand and water molecules
-        self.interacting_res = list(set([''.join([str(i.resnr), str(i.reschain)]) for i in self.all_itypes
-                                         if i.restype not in ['LIG', 'HOH']]))
-        if len(self.interacting_res) != 0:
+        self.interacting_res = list(
+            {
+                ''.join([str(i.resnr), str(i.reschain)])
+                for i in self.all_itypes
+                if i.restype not in ['LIG', 'HOH']
+            }
+        )
+        if self.interacting_res:
             message('Ligand interacts with %i binding site residue(s) in chain(s) %s.\n'
                     % (len(self.interacting_res), '/'.join(self.interacting_chains)), indent=True)
             interactions_list = []
@@ -516,7 +539,7 @@ class PLInteraction:
                 interactions_list.append('%i halogen bond(s)' % num_halogen)
             if num_waterbridges != 0:
                 interactions_list.append('%i water bridge(s)' % num_waterbridges)
-            if not len(interactions_list) == 0:
+            if interactions_list:
                 message('Complex uses %s.\n' % ', '.join(interactions_list), indent=True)
         else:
             message('No interactions for this ligand.\n', indent=True)
@@ -533,19 +556,23 @@ class PLInteraction:
         [involved_atoms.append(wb.d.idx) for wb in self.water_bridges if not wb.protisdon]
         [involved_atoms.append(mcomplex.target.atom.idx) for mcomplex in self.metal_complexes
          if mcomplex.location == 'ligand']
-        for atom in [hba.a for hba in self.ligand.get_hba()]:
-            if atom.idx not in involved_atoms:
-                unpaired_hba.append(atom)
-        for atom in [hbd.d for hbd in self.ligand.get_hbd()]:
-            if atom.idx not in involved_atoms:
-                unpaired_hbd.append(atom)
-
+        unpaired_hba.extend(
+            atom
+            for atom in [hba.a for hba in self.ligand.get_hba()]
+            if atom.idx not in involved_atoms
+        )
+        unpaired_hbd.extend(
+            atom
+            for atom in [hbd.d for hbd in self.ligand.get_hbd()]
+            if atom.idx not in involved_atoms
+        )
         # unpaired halogen bond donors in ligand (not used for the previous + halogen bonds)
         [involved_atoms.append(atom.don.x.idx) for atom in self.halogen_bonds]
-        for atom in [haldon.x for haldon in self.ligand.halogenbond_don]:
-            if atom.idx not in involved_atoms:
-                unpaired_hal.append(atom)
-
+        unpaired_hal.extend(
+            atom
+            for atom in [haldon.x for haldon in self.ligand.halogenbond_don]
+            if atom.idx not in involved_atoms
+        )
         return unpaired_hba, unpaired_hbd, unpaired_hal
 
     def refine_hydrophobic(self, all_h, pistacks):
